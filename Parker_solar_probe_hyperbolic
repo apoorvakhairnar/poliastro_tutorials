@@ -1,0 +1,87 @@
+## orbit period
+T_ref = 150 * u.day
+
+## gravitational parameter of sun
+k = Sun.k
+
+## semi major axis of the elliptical orbit
+a_ref = np.cbrt(k * T_ref ** 2 / (4 * np.pi ** 2)).to(u.km)
+a_ref.to(u.au)
+
+## specific orbital energy
+energy_ref = (-k / (2 * a_ref)).to(u.J / u.kg)
+
+flyby_1_time = Time("2021-02-15", scale="tdb")
+## flyby coordinates and time
+r_mag_ref = norm(Ephem.from_body(Venus, flyby_1_time).rv()[0])
+r_mag_ref.to(u.au)
+## orbital speed from specific orbital energy equation
+v_mag_ref = np.sqrt(2 * k / r_mag_ref - k / a_ref)
+v_mag_ref.to(u.km / u.s)
+
+# launch time
+d_launch = Time("2021-01-01", scale="tdb")
+
+## PV and V at launch and at flyby
+r0, _ = Ephem.from_body(Earth, d_launch).rv()
+r1, V = Ephem.from_body(Venus, flyby_1_time).rv()
+r0 = r0[0] ## position vector of Earth at launch
+r1 = r1[0] ## position vector of Venus at flyby
+V = V[0] ## Velocity vector of Venus at flyby
+V.to(u.km / u.day)
+
+## time of flight
+tof = flyby_1_time - d_launch
+## Lambert's problem with Initial Orbit Determination (IOD) module
+((v0, v1_pre),) = iod.lambert(Sun.k, r0, r1, tof.to(u.s))
+
+## flyby distance
+h = 2548 * u.km
+d_flyby_1 = Venus.R + h
+d_flyby_1.to(u.km)
+
+## computing outbound velocity and turn angle for default entry angle
+V_2_v_, delta_ = compute_flyby(v1_pre, V, Venus.k, d_flyby_1)
+
+## optimizing entry angle value
+def func(theta):
+    V_2_v, _ = compute_flyby(v1_pre, V, Venus.k, d_flyby_1, theta * u.rad)
+    ss_1 = Orbit.from_vectors(Sun, r1, V_2_v, epoch=flyby_1_time)
+    return (ss_1.period - T_ref).to(u.day).value
+theta_range = np.linspace(0, 2 * np.pi)
+plt.plot(theta_range, [func(theta) for theta in theta_range])
+plt.axhline(0, color="k", linestyle="dashed")
+
+## root of equation in the interval [0, 2] using Brent's method
+theta_opt_a = brentq(func, 0, 2) * u.rad
+theta_opt_a.to(u.deg)
+## root of equation in the interval [5, 6] using Brent's method
+theta_opt_b = brentq(func, 5, 6) * u.rad
+theta_opt_b.to(u.deg)
+
+V_2_v_a, delta_a = compute_flyby(v1_pre, V[0], Venus.k, d_flyby_1, theta_opt_a)
+V_2_v_b, delta_b = compute_flyby(v1_pre, V[0], Venus.k, d_flyby_1, theta_opt_b)
+
+ss01 = Orbit.from_vectors(Sun, r1, v1_pre, epoch=flyby_1_time)
+ss01
+ss_1_a = Orbit.from_vectors(Sun, r1, V_2_v_a, epoch=flyby_1_time)
+ss_1_a.change_plane(Planes.EARTH_ECLIPTIC)
+ss_1_b = Orbit.from_vectors(Sun, r1, V_2_v_b, epoch=flyby_1_time)
+ss_1_b.change_plane(Planes.EARTH_ECLIPTIC)
+
+frame1 = StaticOrbitPlotter(plane=Planes.EARTH_ECLIPTIC)
+
+frame1.plot(ss01, label="ref", color="black")
+frame1.plot(ss_1_a, label="entry angle a", color="red")
+frame1.plot(ss_1_b, label="entry angle b")
+
+## the better orbit
+ss_1_a.period.to(u.day)
+ss_1_a.a
+
+frame = StaticOrbitPlotter(plane=Planes.EARTH_ECLIPTIC)
+
+frame.plot_body_orbit(Earth, d_launch)
+frame.plot_body_orbit(Venus, flyby_1_time)
+frame.plot(ss01, label="#0 to #1", color="C2")
+frame.plot(ss_1_a, label="#1 to #2", color="C3");
